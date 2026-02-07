@@ -23,6 +23,13 @@ from .const import BLEAK_EXCEPTIONS, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
+def _get_manufacturer_data(
+    service_info: BluetoothServiceInfoBleak,
+) -> bytes | None:
+    """Safely extract AC Infinity manufacturer data from a service info."""
+    return service_info.advertisement.manufacturer_data.get(MANUFACTURER_ID)
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for AC Infinity Bluetooth."""
 
@@ -39,10 +46,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the bluetooth discovery step."""
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
+        raw = _get_manufacturer_data(discovery_info)
+        if not raw:
+            return self.async_abort(reason="no_devices_found")
         self._discovery_info = discovery_info
-        device: DeviceInfo = parse_manufacturer_data(
-            discovery_info.advertisement.manufacturer_data[MANUFACTURER_ID]
-        )
+        device: DeviceInfo = parse_manufacturer_data(raw)
         self.context["title_placeholders"] = {"name": device.name}
         return await self.async_step_user()
 
@@ -71,15 +79,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 await controller.stop()
+                raw = _get_manufacturer_data(discovery_info)
                 return self.async_create_entry(
                     title=controller.name,
                     data={
                         CONF_ADDRESS: discovery_info.address,
-                        CONF_SERVICE_DATA: parse_manufacturer_data(
-                            discovery_info.advertisement.manufacturer_data[
-                                MANUFACTURER_ID
-                            ]
-                        ),
+                        CONF_SERVICE_DATA: parse_manufacturer_data(raw)
+                        if raw
+                        else DeviceInfo(),
                     },
                 )
 
@@ -93,6 +100,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     or discovery.address in self._discovered_devices
                 ):
                     continue
+                if MANUFACTURER_ID not in discovery.advertisement.manufacturer_data:
+                    continue
                 self._discovered_devices[discovery.address] = discovery
 
         if not self._discovered_devices:
@@ -100,10 +109,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         devices = {}
         for service_info in self._discovered_devices.values():
-            device = parse_manufacturer_data(
-                service_info.advertisement.manufacturer_data[MANUFACTURER_ID]
-            )
-            devices[service_info.address] = f"{device.name} ({service_info.address})"
+            raw = _get_manufacturer_data(service_info)
+            if raw:
+                device = parse_manufacturer_data(raw)
+                devices[service_info.address] = (
+                    f"{device.name} ({service_info.address})"
+                )
+            else:
+                devices[service_info.address] = service_info.address
 
         data_schema = vol.Schema(
             {

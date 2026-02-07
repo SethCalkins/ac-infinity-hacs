@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Any
 
-from ac_infinity_ble import ACInfinityController
+from ac_infinity_ble import ACInfinityController, get_mode
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -30,11 +30,12 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the light platform for LEDBLE."""
+    """Set up sensor platform for AC Infinity."""
     data: ACInfinityData = hass.data[DOMAIN][entry.entry_id]
     entities = [
         TemperatureSensor(data.coordinator, data.device, entry.title),
         HumiditySensor(data.coordinator, data.device, entry.title),
+        WorkModeSensor(data.coordinator, data.device, entry.title),
     ]
     if data.device.state.version >= 3 and data.device.state.type in [7, 9, 11, 12]:
         entities.append(VpdSensor(data.coordinator, data.device, entry.title))
@@ -58,7 +59,7 @@ class ACInfinitySensor(
         self._name = name
         self._attr_device_info = DeviceInfo(
             name=device.name,
-            model=DEVICE_MODEL[device.state.type],
+            model=DEVICE_MODEL.get(device.state.type, f"Unknown ({device.state.type})"),
             manufacturer="AC Infinity",
             sw_version=device.state.version,
             connections={(dr.CONNECTION_BLUETOOTH, device.address)},
@@ -68,7 +69,6 @@ class ACInfinitySensor(
     @callback
     def _async_update_attrs(self) -> None:
         """Handle updating _attr values."""
-        raise NotImplementedError("Not yet implemented.")
 
     @callback
     def _handle_coordinator_update(self, *args: Any) -> None:
@@ -105,7 +105,6 @@ class TemperatureSensor(ACInfinitySensor):
 
 
 class HumiditySensor(ACInfinitySensor):
-    _attr_name = "Humidity"
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_device_class = SensorDeviceClass.HUMIDITY
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -143,3 +142,27 @@ class VpdSensor(ACInfinitySensor):
     def _async_update_attrs(self) -> None:
         """Handle updating _attr values."""
         self._attr_native_value = self._device.vpd
+
+
+class WorkModeSensor(ACInfinitySensor):
+    _attr_device_class = SensorDeviceClass.ENUM
+
+    @property
+    def name(self) -> str:
+        return f"{self._name} Mode"
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique, Home Assistant friendly identifier for this entity."""
+        return f"{self._device.address}_work_mode"
+
+    @property
+    def options(self) -> list[str]:
+        """Return the list of possible states."""
+        return ["OFF", "ON", "AUTO", "TIMER ON", "TIMER OFF", "CYCLE", "SCHEDULE", "VPD"]
+
+    @callback
+    def _async_update_attrs(self) -> None:
+        """Handle updating _attr values."""
+        mode = get_mode(self._device.work_mode)
+        self._attr_native_value = mode if mode else "OFF"

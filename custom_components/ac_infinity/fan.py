@@ -34,7 +34,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the light platform for LEDBLE."""
+    """Set up the fan platform for AC Infinity."""
     data: ACInfinityData = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([ACInfinityFan(data.coordinator, data.device, entry.title)])
 
@@ -95,8 +95,9 @@ class ACInfinityFan(
     def _async_update_attrs(self) -> None:
         """Handle updating _attr values."""
         self._attr_is_on = self._device.is_on
+        fan_speed = self._device.state.fan or 0
         self._attr_percentage = ranged_value_to_percentage(
-            SPEED_RANGE, self._device.state.fan
+            SPEED_RANGE, min(max(fan_speed, 0), 10)
         )
 
     @callback
