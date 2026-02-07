@@ -84,9 +84,16 @@ class ACInfinityDataUpdateCoordinator(ActiveBluetoothDataUpdateCoordinator[None]
     ) -> None:
         """Handle a Bluetooth event."""
         self.ble_device = service_info.device
-        self.controller.set_ble_device_and_advertisement_data(
-            service_info.device, service_info.advertisement
-        )
+        try:
+            self.controller.set_ble_device_and_advertisement_data(
+                service_info.device, service_info.advertisement
+            )
+        except (KeyError, IndexError, ValueError) as ex:
+            self.logger.debug(
+                "%s: Error processing advertisement: %s",
+                self.ble_device.address,
+                ex,
+            )
         if self.controller.name:
             self._ready_event.set()
         self.logger.debug(
